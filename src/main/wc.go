@@ -28,14 +28,12 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 	words := strings.FieldsFunc(contents, func(c rune) bool {
 		return !unicode.IsLetter(c) && !unicode.IsNumber(c)
 	})
-	// fmt.Println("words", words)
 
 	// count
 	counts := make(map[string]int)
 	for _, w := range words {
 		counts[w]++
 	}
-	// fmt.Println(counts)
 
 	// convert from map to a slice
 	kvs := make([]mapreduce.KeyValue, 0, len(counts))
