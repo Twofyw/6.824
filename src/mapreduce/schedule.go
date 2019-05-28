@@ -14,6 +14,7 @@ import (
 // suitable for passing to call(). registerChan will yield all
 // existing registered workers (if any) and new ones as they register.
 //
+
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
 	var ntasks int
 	var n_other int // number of inputs (for reduce) or outputs (for map)
@@ -34,39 +35,30 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	// have completed successfully, schedule() should return.
 	//
 	// Your code here (Part III, Part IV).
-	//
 
-	// taskNumbers := make(map[string]int)
-	taskNumbers := make([]int, ntasks)
-	for i := 0; i < ntasks; i++ {
-		taskNumbers[i] = i
-	}
-
-	// loop until taskNumbers exhaust
+	// loop over available workers
 	var wg sync.WaitGroup
-	remainingTasks := ntasks
-	for remainingTasks > 0 {
-		for taskNumber := range taskNumbers {
-			workerAddress := <-registerChan
-			if phase == mapPhase {
-				fmt.Println(taskNumbers)
-				mapFile = mapFiles[taskNumbers[0]]
-			}
-			args := DoTaskArgs{jobName, mapFile, phase, taskNumber, n_other}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				if call(workerAddress, "Worker.DoTask", args, nil) {
-					taskNumbers = taskNumbers[1:]
-					remainingTasks--
-				} else {
-					// submit again
-				}
-				registerChan <- workerAddress
-			}()
+	for taskNumber := 0; taskNumber < ntasks; taskNumber++ {
+		if phase == mapPhase {
+			mapFile = mapFiles[taskNumber]
 		}
-		wg.Wait()
+		args := DoTaskArgs{jobName, mapFile, phase, taskNumber, n_other}
+		//	assign the first waiting task
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			retry := true
+			for retry {
+				workerAddress := <- registerChan
+				retry = !call(workerAddress, "Worker.DoTask", args, nil)
+				if !retry {
+					go func () {
+						registerChan <- workerAddress
+					}()
+				}
+			}
+		}()
 	}
-
+	wg.Wait()
 	fmt.Printf("Schedule: %v done\n", phase)
 }
