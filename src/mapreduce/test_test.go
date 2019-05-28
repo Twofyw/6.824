@@ -44,6 +44,7 @@ func ReduceFunc(key string, values []string) string {
 // Checks input file agaist output file: each input number should show up
 // in the output file in string sorted order
 func check(t *testing.T, files []string) {
+	t.Log(files)
 	output, err := os.Open("mrtmp.test")
 	if err != nil {
 		log.Fatal("check: ", err)

@@ -1,10 +1,10 @@
 package mapreduce
 
 import (
-	"hash/fnv"
-	"os"
-	"io/ioutil"
 	"encoding/json"
+	"hash/fnv"
+	"io/ioutil"
+	"os"
 )
 
 func doMap(
@@ -14,7 +14,6 @@ func doMap(
 	nReduce int, // the number of reduce task that will be run ("R" in the paper)
 	mapF func(filename string, contents string) []KeyValue,
 ) {
-
 	// doMap manages one map task: it should
 	// read one of the input files (inFile),
 	rawData, err := ioutil.ReadFile(inFile)
@@ -28,14 +27,14 @@ func doMap(
 	// and partition mapF's output into nReduce intermediate files.
 	// file map
 	// caution: check maximum open files number and memory pressure
-		// since files are really written when they are closed
-	var fileMap map[int]*os.File
+	// since files are really written only when they are closed
+	fileMap := make(map[int]*os.File)
 	for _, kv := range userMapResult {
 		r := ihash(kv.Key) % nReduce // reduce task
 		f, ok := fileMap[r]
 		if !ok {
 			intermFilename := reduceName(jobName, mapTask, r)
-			f, err := os.Create(intermFilename)
+			f, err = os.Create(intermFilename)
 			checkError(err)
 			fileMap[r] = f
 		}

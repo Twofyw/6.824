@@ -34,7 +34,6 @@ type KeyValue struct {
 // reduceName constructs the name of the intermediate file which map task
 // <mapTask> produces for reduce task <reduceTask>.
 func reduceName(jobName string, mapTask int, reduceTask int) string {
-	fmt.Println("r", reduceTask)
 	return "mrtmp." + jobName + "-" + strconv.Itoa(mapTask) + "-" + strconv.Itoa(reduceTask)
 }
 
@@ -44,7 +43,7 @@ func mergeName(jobName string, reduceTask int) string {
 }
 
 func checkError(e error) {
-    if e != nil {
-        panic(e)
-    }
+	if e != nil {
+		panic(e)
+	}
 }
