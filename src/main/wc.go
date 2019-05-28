@@ -4,7 +4,16 @@ import (
 	"fmt"
 	"mapreduce"
 	"os"
+	"strconv"
+	"strings"
+	"unicode"
 )
+
+func checkError(e error) {
+	if e != nil {
+		panic(e)
+	}
+}
 
 //
 // The map function is called once for each file of input. The first
@@ -15,6 +24,25 @@ import (
 //
 func mapF(filename string, contents string) []mapreduce.KeyValue {
 	// Your code here (Part II).
+	// split
+	words := strings.FieldsFunc(contents, func(c rune) bool {
+		return !unicode.IsLetter(c) && !unicode.IsNumber(c)
+	})
+	// fmt.Println("words", words)
+
+	// count
+	counts := make(map[string]int)
+	for _, w := range words {
+		counts[w]++
+	}
+	// fmt.Println(counts)
+
+	// convert from map to a slice
+	kvs := make([]mapreduce.KeyValue, 0, len(counts))
+	for k, v := range counts {
+		kvs = append(kvs, mapreduce.KeyValue{k, strconv.Itoa(v)})
+	}
+	return kvs
 }
 
 //
@@ -24,6 +52,15 @@ func mapF(filename string, contents string) []mapreduce.KeyValue {
 //
 func reduceF(key string, values []string) string {
 	// Your code here (Part II).
+	// fmt.Println("key", key)
+	// fmt.Println("values", values)
+	count := 0
+	for _, v := range values {
+		n, err := strconv.Atoi(v)
+		checkError(err)
+		count += n
+	}
+	return strconv.Itoa(count)
 }
 
 // Can be run in 3 ways:
