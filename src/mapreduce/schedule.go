@@ -1,6 +1,9 @@
 package mapreduce
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 //
 // schedule() starts and waits for all tasks in the given phase (mapPhase
@@ -14,6 +17,7 @@ import "fmt"
 func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, registerChan chan string) {
 	var ntasks int
 	var n_other int // number of inputs (for reduce) or outputs (for map)
+	var mapFile string
 	switch phase {
 	case mapPhase:
 		ntasks = len(mapFiles)
@@ -21,6 +25,7 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	case reducePhase:
 		ntasks = nReduce
 		n_other = len(mapFiles)
+		mapFile = ""
 	}
 
 	fmt.Printf("Schedule: %v %v tasks (%d I/Os)\n", ntasks, phase, n_other)
@@ -30,5 +35,38 @@ func schedule(jobName string, mapFiles []string, nReduce int, phase jobPhase, re
 	//
 	// Your code here (Part III, Part IV).
 	//
+
+	// taskNumbers := make(map[string]int)
+	taskNumbers := make([]int, ntasks)
+	for i := 0; i < ntasks; i++ {
+		taskNumbers[i] = i
+	}
+
+	// loop until taskNumbers exhaust
+	var wg sync.WaitGroup
+	remainingTasks := ntasks
+	for remainingTasks > 0 {
+		for taskNumber := range taskNumbers {
+			workerAddress := <-registerChan
+			if phase == mapPhase {
+				fmt.Println(taskNumbers)
+				mapFile = mapFiles[taskNumbers[0]]
+			}
+			args := DoTaskArgs{jobName, mapFile, phase, taskNumber, n_other}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if call(workerAddress, "Worker.DoTask", args, nil) {
+					taskNumbers = taskNumbers[1:]
+					remainingTasks--
+				} else {
+					// submit again
+				}
+				registerChan <- workerAddress
+			}()
+		}
+		wg.Wait()
+	}
+
 	fmt.Printf("Schedule: %v done\n", phase)
 }
