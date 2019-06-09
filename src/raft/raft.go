@@ -17,12 +17,14 @@ package raft
 //   in the same server.
 //
 
-import "sync"
+import (
+	"bytes"
+	"labgob"
+	"sync"
+	"time"
+	"math/rand"
+)
 import "labrpc"
-
-// import "bytes"
-// import "labgob"
-
 
 
 //
@@ -42,6 +44,12 @@ type ApplyMsg struct {
 	CommandIndex int
 }
 
+// An entry in log[]
+type Log struct {
+	command interface{}
+	term 	int
+}
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -54,16 +62,30 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
+	isLeader	bool
+	
 
+	// Persistent state
+	currentTerm	int
+	votedFor 	int
+	log 		[]Log
+
+	// Volatile state
+	commitIndex	int
+	lastApplied	int
+
+	// Volatile state on leaders
+	nextIndex	[]int
+	matchIndex	[]int
 }
 
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
-
-	var term int
-	var isleader bool
 	// Your code here (2A).
+	term := rf.currentTerm
+    isleader := rf.isLeader
+
 	return term, isleader
 }
 
@@ -82,6 +104,16 @@ func (rf *Raft) persist() {
 	// e.Encode(rf.yyy)
 	// data := w.Bytes()
 	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	e.Encode(rf.currentTerm)
+	// votedFor: candidateId that received vote in current term (or null if none)
+	//e.Encode(rf.votedFor)
+	// log entries; each entry contains command for state machine,
+		// and term when entry was received by leader (first index is 1)
+	//e.Encode(rf.logEntries)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 
@@ -116,6 +148,10 @@ func (rf *Raft) readPersist(data []byte) {
 //
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
+	Term int
+	CandidateID int
+	LastLogIndex int
+	LastLogTerm int
 }
 
 //
@@ -124,6 +160,8 @@ type RequestVoteArgs struct {
 //
 type RequestVoteReply struct {
 	// Your data here (2A).
+	Term int
+	VoteGranted bool
 }
 
 //
@@ -131,6 +169,26 @@ type RequestVoteReply struct {
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
+	reply.Term = rf.currentTerm
+
+	// Reply false if term < currentTerm
+	if args.Term < rf.currentTerm {
+		reply.VoteGranted = false
+		return
+	}
+
+	// If votedFor is null or candidateId, and candidate’s log is at
+	// least as up-to-date as receiver’s log, grant vote
+
+	// Raft determines which of two logs is more up-to-date by comparing
+	// the index and term of the last entries in the logs. If the logs
+	// have last entries with different terms, then the log with the later
+	// term is more up-to-date. If the logs end with the same term, then
+	// whichever log is longer is more up-to-date.
+	isUpToDate := args.LastLogTerm > rf.currentTerm ||
+		(args.LastLogTerm == rf.currentTerm && args.LastLogIndex >= rf.lastApplied)
+	reply.VoteGranted = (rf.votedFor == -1 || rf.votedFor == args.CandidateID) && isUpToDate
+	return
 }
 
 //
@@ -185,12 +243,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
 	term := -1
-	isLeader := true
-
 	// Your code here (2B).
 
 
-	return index, term, isLeader
+	return index, term, rf.isLeader
 }
 
 //
@@ -222,6 +278,20 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	// create a background goroutine that will kick off leader election
+	// periodically by sending out RequestVote RPCs when it hasn't heard
+	// from another peer for a while.
+	s1 := rand.NewSource(time.Now().UnixNano())
+	r1 := rand.New(s1)
+	go func() {
+		for {
+			time.Sleep(time.Duration(r1.Intn(150)+150) * time.Microsecond)
+
+		}
+	}()
+
+	// TODO: heartbeat goroutine
+
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())

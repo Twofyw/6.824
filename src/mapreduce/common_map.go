@@ -34,7 +34,6 @@ func doMap(
 		f, ok := fileMap[r]
 		if !ok {
 			intermFilename := reduceName(jobName, mapTask, r)
-			// f, err = os.Create(intermFilename)
 			f, err = os.OpenFile(intermFilename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			checkError(err)
 			fileMap[r] = f
