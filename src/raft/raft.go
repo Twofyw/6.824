@@ -19,13 +19,17 @@ package raft
 
 import (
 	"bytes"
+	"fmt"
 	"labgob"
+	"math/rand"
 	"sync"
 	"time"
-	"math/rand"
 )
 import "labrpc"
 
+const heartbeatInterval = 110
+const electionTimeoutMin = 200
+const electionTimeoutMax = 400
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -50,6 +54,12 @@ type Log struct {
 	term 	int
 }
 
+const (
+	leader = iota
+	follower
+	candidate
+)
+
 //
 // A Go object implementing a single Raft peer.
 //
@@ -62,8 +72,8 @@ type Raft struct {
 	// Your data here (2A, 2B, 2C).
 	// Look at the paper's Figure 2 for a description of what
 	// state a Raft server must maintain.
-	isLeader	bool
-	
+    state 		int
+	receivedHeartbeat bool
 
 	// Persistent state
 	currentTerm	int
@@ -79,14 +89,15 @@ type Raft struct {
 	matchIndex	[]int
 }
 
+func (rf *Raft) IsLeader() bool {
+	return rf.state == leader
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
 	// Your code here (2A).
-	term := rf.currentTerm
-    isleader := rf.isLeader
-
-	return term, isleader
+	return rf.currentTerm, rf.IsLeader()
 }
 
 
@@ -242,11 +253,10 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	index := -1
-	term := -1
 	// Your code here (2B).
 
 
-	return index, term, rf.isLeader
+	return index, rf.currentTerm, rf.IsLeader()
 }
 
 //
@@ -257,6 +267,96 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 //
 func (rf *Raft) Kill() {
 	// Your code here, if desired.
+}
+
+func (rf *Raft) AppendEntries() {
+	rf.receivedHeartbeat = true
+	// TODO: process arguments...
+}
+
+func (rf *Raft) heartbeat() {
+	for {
+		time.Sleep(time.Duration(heartbeatInterval) * time.Microsecond)
+		for idx, peer := range rf.peers {
+			if idx != rf.me {
+				ok := peer.Call("Raft.AppendEntries", nil, nil)
+				if !ok {
+					_ = fmt.Errorf("heartbeat")
+				}
+			}
+		}
+	}
+}
+
+func (rf *Raft) electLeader() {
+	s1 := rand.NewSource(time.Now().UnixNano())
+	r1 := rand.New(s1)
+	for {
+		time.Sleep(time.Duration(r1.Intn(electionTimeoutMax-electionTimeoutMin)+electionTimeoutMin) * time.Microsecond)
+		if !rf.IsLeader() && !rf.receivedHeartbeat {
+			// Begin an election
+			rf.mu.Lock()
+			rf.currentTerm += 1
+			rf.state = candidate
+			// votes for itself
+			rf.votedFor = rf.me
+
+			nVotes := 1
+			var wg sync.WaitGroup
+			wg.Add(len(rf.peers))
+			mu := sync.Mutex{}
+			for idx, peer := range rf.peers {
+				if idx != rf.me {
+					// issues RequestVote RPCs in parallel to each of the other servers in the cluster
+					go func() {
+						defer wg.Done()
+						args := &RequestVoteArgs{}
+						args.CandidateID = rf.me
+						args.LastLogIndex = rf.commitIndex
+						args.LastLogTerm = rf.currentTerm - 1
+						reply := &RequestVoteReply{}
+						ok := peer.Call("Raft.RequestVote", args, reply)
+						if !ok {
+							_ = fmt.Errorf("begin an election. Me: %d; lastTerm: %d", rf.me, args.LastLogTerm)
+						} else {
+							// Increment count
+							mu.Lock() // lock nVotes
+							if reply.Term == args.Term {
+								if reply.VoteGranted {
+									nVotes += 1
+								}
+							} else if reply.Term > args.Term {
+								// Not specified in the paper, but I assume this is equivalent to seeing a new leader?
+								fmt.Println("Not specified in the paper, but I assume this is equivalent to seeing a new leader?")
+							}
+							mu.Unlock()
+						}
+					}()
+				}
+			}
+			rf.mu.Unlock()
+			wg.Wait()
+			// Count votes
+			rf.mu.Lock()
+			if rf.state == candidate { // if didn't receive an AppendEntries RPC from a legitimate leader
+				if nVotes > len(rf.peers)/2 {
+					rf.state = leader // promote to leader
+					go rf.heartbeat()
+				}
+
+				// TODO: reset state and double check these conditions
+				rf.receivedHeartbeat = false
+				//for i:= range rf.nextIndex {
+				//rf.nextIndex[i] = len(rf.log)
+				//}
+				//for i := range rf.matchIndex {
+				//rf.matchIndex[i]
+
+				//}
+			}
+			rf.mu.Unlock()
+		}
+	}
 }
 
 //
@@ -276,19 +376,13 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
+	rf.state = follower
 
 	// Your initialization code here (2A, 2B, 2C).
 	// create a background goroutine that will kick off leader election
 	// periodically by sending out RequestVote RPCs when it hasn't heard
 	// from another peer for a while.
-	s1 := rand.NewSource(time.Now().UnixNano())
-	r1 := rand.New(s1)
-	go func() {
-		for {
-			time.Sleep(time.Duration(r1.Intn(150)+150) * time.Microsecond)
-
-		}
-	}()
+	go rf.electLeader()
 
 	// TODO: heartbeat goroutine
 
